@@ -1,14 +1,11 @@
 # pyrefly: ignore [missing-import]
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
 import os
-# pyrefly: ignore [missing-import]
-from fastapi import FastAPI, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Depends, HTTPException, status  # pyright: ignore[reportMissingImports]
+from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 from typing import List, Optional
-# pyrefly: ignore [missing-import]
-from bson import ObjectId
-# pyrefly: ignore [missing-import]
-from pymongo import AsyncMongoClient
+from bson import ObjectId  # pyright: ignore[reportMissingImports]
+from pymongo import AsyncMongoClient # pyright: ignore[reportMissingImports]
 
 class MetricsModel(BaseModel):
     methods: Optional[str] = ""
@@ -16,19 +13,19 @@ class MetricsModel(BaseModel):
     length: Optional[str] = ""
     bead_atom: Optional[str] = ""
     chain: Optional[str] = ""
-    time: Optional[str] = ""
-    gpu_time: Optional[str] = ""
-    final_score: Optional[str] = ""
-    best_score_step: Optional[str] = ""
+    time: Optional[float] = 0.0
+    gpu_time: Optional[float] = 0.0
+    final_score: Optional[float] = 0.0
+    best_score_step: Optional[int] = 0
     molecule: Optional[str] = ""
     local_filepath: Optional[str] = ""
-    potential: Optional[str] = ""
-    bond: Optional[str] = ""
+    potential: Optional[float] = 0.0
+    bond: Optional[float] = 0.0
 
 class InterframeModel(BaseModel):
     phase: Optional[str] = ""
     epoch: Optional[str] = ""
-    score: Optional[str] = ""
+    score: Optional[float] = 0.0
     video_path: Optional[str] = ""
     pdb_path: Optional[str] = ""
 
@@ -77,7 +74,7 @@ async def list_sequences(limit: int = 10, skip: int = 0, collection = Depends(ge
     return results
 
 @app.get("/sequences/{sequence_id}", response_model=SequenceResponseModel)
-async def get_sequence(sequence_id: str, collection = Depends(get_collection)):
+async def by_sequence(sequence_id: str, collection = Depends(get_collection)):
     try:
         obj_id = ObjectId(sequence_id)
     except Exception:
@@ -88,6 +85,7 @@ async def get_sequence(sequence_id: str, collection = Depends(get_collection)):
         doc["_id"] = str(doc["_id"])
         return doc
     raise HTTPException(status_code=404, detail="Sequence not found")
+
 
 @app.put("/sequences/{sequence_id}", response_model=SequenceResponseModel)
 async def update_sequence(sequence_id: str, data: SequenceModel, collection = Depends(get_collection)):
@@ -106,21 +104,49 @@ async def update_sequence(sequence_id: str, data: SequenceModel, collection = De
     updated_doc["_id"] = str(updated_doc["_id"])
     return updated_doc
 
-# @app.delete("/sequences/{sequence_id}", status_code=status.HTTP_204_NO_CONTENT)
-# async def delete_sequence(sequence_id: str, collection = Depends(get_collection)):
-#     try:
-#         obj_id = ObjectId(sequence_id)
-#     except Exception:
-#         raise HTTPException(status_code=400, detail="Invalid sequence ID format")
-        
-#     result = await collection.delete_one({"_id": obj_id})
-#     if result.deleted_count == 0:
-#         raise HTTPException(status_code=404, detail="Sequence not found")
-
-@app.get("/test")
-async def test_query(chain: str = "R", collection = Depends(get_collection)):
-    """Original test route ported to new collection structure"""
+@app.get("/chain")
+async def by_chain(chain: str = "R", collection = Depends(get_collection)):
     query = {"metrics.chain": chain}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+@app.get("/vers")
+async def by_vers(vers: str = "1.0", collection = Depends(get_collection)):
+    query = {"vers": vers}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+@app.get("/score/{lower},{upper}")
+async def by_score_range(lower: float, upper:float , collection = Depends(get_collection)):
+    query = {"metrics.final_score":{"$gt": float(lower), "$lt":float(upper)}}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+    
+@app.get("/organism/{organisme_name}")
+async def by_organism(organisme_name: str, collection = Depends(get_collection)):
+    query = {"organism": organisme_name}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+@app.get("/name/{sequence_name}")
+async def by_name(sequence_name: str, collection = Depends(get_collection)):
+    query = {"name": sequence_name}
     cursor = collection.find(query)
     results = []
     async for doc in cursor:
