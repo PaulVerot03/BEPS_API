@@ -10,7 +10,7 @@ from pymongo import AsyncMongoClient # pyright: ignore[reportMissingImports]
 class MetricsModel(BaseModel):
     methods: Optional[str] = ""
     score_function: Optional[str] = ""
-    length: Optional[str] = ""
+    length: Optional[int] = 0
     bead_atom: Optional[str] = ""
     chain: Optional[str] = ""
     time: Optional[float] = 0.0
@@ -50,12 +50,14 @@ class SequenceResponseModel(SequenceModel):
     }
 
 app = FastAPI(title="Sequence API")
+
 async def get_collection():
     load_dotenv()
     MONGO_URI = os.getenv("API_USER")
     client = AsyncMongoClient(MONGO_URI, tls=True)
     db = client["anais"]
     return db["sequence"]
+
 
 @app.post("/sequences/", response_model=SequenceResponseModel, status_code=status.HTTP_201_CREATED)
 async def create_sequence(data: SequenceModel, collection = Depends(get_collection)):
@@ -64,6 +66,8 @@ async def create_sequence(data: SequenceModel, collection = Depends(get_collecti
     sequence_dict["_id"] = str(result.inserted_id)
     return sequence_dict
 
+
+#retourner toutes les sequaneces 
 @app.get("/sequences/", response_model=List[SequenceResponseModel])
 async def list_sequences(limit: int = 10, skip: int = 0, collection = Depends(get_collection)):
     cursor = collection.find().skip(skip).limit(limit)
@@ -72,6 +76,7 @@ async def list_sequences(limit: int = 10, skip: int = 0, collection = Depends(ge
         doc["_id"] = str(doc["_id"])
         results.append(doc)
     return results
+
 
 @app.get("/sequences/{sequence_id}", response_model=SequenceResponseModel)
 async def by_sequence(sequence_id: str, collection = Depends(get_collection)):
@@ -147,6 +152,19 @@ async def by_organism(organisme_name: str, collection = Depends(get_collection))
 @app.get("/name/{sequence_name}")
 async def by_name(sequence_name: str, collection = Depends(get_collection)):
     query = {"name": sequence_name}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+
+
+#chercher par sequence arn specific 
+@app.get("/sequence/{arn_sequence}")
+async def by_arn_sequence(arn_sequence: str, collection = Depends(get_collection)):
+    query = {"sequence": arn_sequence}
     cursor = collection.find(query)
     results = []
     async for doc in cursor:
