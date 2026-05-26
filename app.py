@@ -164,7 +164,7 @@ async def by_name(sequence_name: str, collection = Depends(get_collection)):
 #chercher par sequence arn specific 
 @app.get("/sequence/{arn_sequence}")
 async def by_arn_sequence(arn_sequence: str, collection = Depends(get_collection)):
-    query = {"sequence": arn_sequence}
+    query = {"sequence": arn_sequence.upper()}
     cursor = collection.find(query)
     results = []
     async for doc in cursor:
