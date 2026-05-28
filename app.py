@@ -6,6 +6,13 @@ from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 from typing import List, Optional
 from bson import ObjectId  # pyright: ignore[reportMissingImports]
 from pymongo import AsyncMongoClient # pyright: ignore[reportMissingImports]
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
+import subprocess
+import sys
+
+load_dotenv()  
 
 class MetricsModel(BaseModel):
     methods: Optional[str] = ""
@@ -51,8 +58,15 @@ class SequenceResponseModel(SequenceModel):
 
 app = FastAPI(title="Sequence API")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 async def get_collection():
-    load_dotenv()
+    
     MONGO_URI = os.getenv("API_USER")
     client = AsyncMongoClient(MONGO_URI, tls=True)
     db = client["anais"]
@@ -171,3 +185,109 @@ async def by_arn_sequence(arn_sequence: str, collection = Depends(get_collection
         doc["_id"] = str(doc["_id"])
         results.append(doc)
     return results
+
+
+#chercher par methode 
+@app.get("/method/{method_name}")
+async def by_method(method_name: str, collection = Depends(get_collection)):
+    query = {"metrics.methods": method_name}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+
+#recherche par atom
+@app.get("/bead_atom/{bead_atom}")
+async def by_bead_atom(bead_atom: str, collection = Depends(get_collection)):
+    query = {"metrics.bead_atom": bead_atom}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+
+#recherche par longueur de sequence 
+@app.get("/length/{length}")
+async def by_length(length: int, collection = Depends(get_collection)):
+    query = {"metrics.length": length}
+    cursor = collection.find(query)
+    results = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return results
+
+
+#recuperer des pdb individuellement
+
+@app.get("/sequences/{sequence_id}/pdb")
+async def get_pdb(sequence_id: str, collection = Depends(get_collection)):
+    try:
+        obj_id = ObjectId(sequence_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid sequence ID format")
+    
+    doc = await collection.find_one(
+        {"_id": obj_id},
+        {"file": 1, "_id": 0}
+    )
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    
+    '''OUTPUTS_PATH = os.getenv("OUTPUTS_PATH", ".")
+    pdb_path = os.path.join(OUTPUTS_PATH, doc.get("file", ""))
+    print(f"Chemin cherché : {pdb_path}")
+    
+    if not os.path.exists(pdb_path):
+        raise HTTPException(status_code=404, detail="PDB file not found on server")
+    
+    return FileResponse(
+        path=pdb_path,
+        filename=os.path.basename(pdb_path),
+        media_type="chemical/x-pdb"
+    )'''
+    file_path = doc.get("file", "")
+    file_path = file_path.replace("outputs/", "")
+    ovh_url = f"https://bucket.paulverot.fr/PDB/{file_path}"
+    print(f"URL OVH : {ovh_url}")  
+    
+    return RedirectResponse(url=ovh_url)
+
+
+@app.post("/calcul/{sequence}")
+async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
+    existe = await collection.find_one({"sequence": sequence})
+    if existe:
+        existe["_id"] = str(existe["_id"])
+        return existe
+
+    RNA_PATH =  os.getenv("RNA_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Optimize_3D_ARNStructure")))
+    BEPS_PATH = os.getenv("BEPS_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "BEPS")))
+    
+    result_rna = subprocess.run([
+        sys.executable, "main.py", "launch",
+        "--input-val", sequence,
+        "--batch",
+        "--score", "RASP",
+        "--molecule", "RNA",
+        "--visualise",
+        "--save-metrics"
+    ], cwd=RNA_PATH)
+    
+    result_beps = subprocess.run([
+        sys.executable, "get_data.py",
+        "--sequence", sequence 
+        ], cwd=BEPS_PATH)
+
+    result = await collection.find_one({"sequence": sequence})
+    if result:
+        result["_id"] = str(result["_id"])
+        return result
+    
+    raise HTTPException(status_code=500, detail="Calcul échoué") 
