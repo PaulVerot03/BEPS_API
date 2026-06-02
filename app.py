@@ -69,9 +69,9 @@ app.add_middleware(
 )
 
 async def get_collection():
-    
     MONGO_URI = os.getenv("API_USER")
-    client = AsyncMongoClient(MONGO_URI, tls=True)
+    mongo_tls = os.getenv("MONGO_TLS")
+    client = AsyncMongoClient(MONGO_URI, tls=mongo_tls)
     db = client["anais"]
     return db["sequence"]
 
