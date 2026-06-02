@@ -1,0 +1,28 @@
+# Caddyfile configuration snippet for reverse-proxying the FastAPI API.
+# Add these blocks to your existing Caddyfile.
+
+# Option A: Subpath routing (e.g. paulverot.fr/api/*)
+# Inside your existing paulverot.fr block, add:
+#
+# paulverot.fr {
+#     # ... your existing website config ...
+#
+#     # Proxy all /api/* requests to FastAPI (stripping the /api prefix if required,
+#     # but since FastAPI uses relative routes or if you want it under /api, handle accordingly)
+#     handle_path /api/* {
+#         reverse_proxy 127.0.0.1:8000
+#     }
+# }
+
+# Option B: Subdomain routing (e.g. api.paulverot.fr)
+# Add a new block at the bottom of your Caddyfile:
+#
+# api.paulverot.fr {
+#     # Automatic SSL/TLS is handled by Caddy
+#     reverse_proxy 127.0.0.1:8000
+#     
+#     # Set response headers/limits if necessary
+#     request_body {
+#         max_size 50MB
+#     }
+# }
