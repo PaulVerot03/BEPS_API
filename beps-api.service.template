@@ -3,12 +3,12 @@ Description=BEPS FastAPI Application
 After=network.target
 
 [Service]
-User=paul
-WorkingDirectory=/home/paul/app/API
-ExecStart=/home/paul/app/API/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+User=blender
+WorkingDirectory=/home/blender/app/BEPS_API
+ExecStart=/home/blender/app/BEPS_API/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
-EnvironmentFile=/home/paul/app/API/.env
+EnvironmentFile=/home/blender/app/BEPS_API/.env
 
 [Install]
 WantedBy=multi-user.target
