@@ -76,8 +76,8 @@ async def get_collection():
     else:
         mongo_tls = mongo_tls_env.lower() in ("true", "1", "yes")
     client = AsyncMongoClient(MONGO_URI, tls=False)
-    db = client["anais"]
-    return db["sequence"]
+    db = client["arn"]
+    return db["sequences"]
 
 
 @app.post("/sequences/", response_model=SequenceResponseModel, status_code=status.HTTP_201_CREATED)
