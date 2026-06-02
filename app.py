@@ -70,7 +70,11 @@ app.add_middleware(
 
 async def get_collection():
     MONGO_URI = os.getenv("API_USER")
-    mongo_tls = os.getenv("MONGO_TLS")
+    mongo_tls_env = os.getenv("MONGO_TLS")
+    if mongo_tls_env is None:
+        mongo_tls = True  # Default to True to preserve original behavior
+    else:
+        mongo_tls = mongo_tls_env.lower() in ("true", "1", "yes")
     client = AsyncMongoClient(MONGO_URI, tls=mongo_tls)
     db = client["anais"]
     return db["sequence"]
