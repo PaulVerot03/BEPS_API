@@ -75,7 +75,7 @@ async def get_collection():
         mongo_tls = True  # Default to True to preserve original behavior
     else:
         mongo_tls = mongo_tls_env.lower() in ("true", "1", "yes")
-    client = AsyncMongoClient(MONGO_URI, tls=mongo_tls)
+    client = AsyncMongoClient(MONGO_URI, tls=False)
     db = client["anais"]
     return db["sequence"]
 
