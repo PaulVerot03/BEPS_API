@@ -318,7 +318,8 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     try:
         result_rna = subprocess.run(
             [
-                sys.executable,
+                "conda activate rna_opt",
+                "python",
                 "main.py",
                 "launch",
                 "--input-val",
