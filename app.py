@@ -316,6 +316,10 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
         raise HTTPException(status_code=500, detail=str(exc))
 
     rna_python = os.getenv("RNA_PYTHON", sys.executable)
+    env = os.environ.copy()
+    env["CUDA_LAUNCH_BLOCKING"] = "1"
+    env["TF_CPP_MIN_LOG_LEVEL"] = "2"
+    
     try:
         result_rna = subprocess.run(
             [
@@ -324,6 +328,7 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
                 f"source $(conda info --base)/etc/profile.d/conda.sh && conda activate rna_opt && python main.py launch --input-val {sequence} --batch --score RASP --molecule RNA --visualise --save-metrics",
             ],
             cwd=RNA_PATH,
+            env=env,
             check=True,
             capture_output=True,
             text=True,
