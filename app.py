@@ -287,7 +287,7 @@ async def get_pdb(sequence_id: str, collection = Depends(get_collection)):
     return RedirectResponse(url=ovh_url)
 
 
-@app.post("/calcul/{sequence}")
+@app.api_route("/calcul/{sequence}", methods=["GET", "POST"])
 async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     sequence = sequence.upper()
     existe = await collection.find_one({"sequence": sequence})
