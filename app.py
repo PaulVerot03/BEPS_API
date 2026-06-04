@@ -315,11 +315,11 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    rna_python = os.getenv("RNA_PYTHON", sys.executable)
     try:
         result_rna = subprocess.run(
             [
-                "conda activate rna_opt",
-                "python",
+                rna_python,
                 "main.py",
                 "launch",
                 "--input-val",
@@ -336,6 +336,11 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
             check=True,
             capture_output=True,
             text=True,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"RNA executable not found: {exc}",
         )
     except subprocess.CalledProcessError as exc:
         raise HTTPException(
