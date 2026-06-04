@@ -80,6 +80,26 @@ async def get_collection():
     return db["sequences"]
 
 
+def find_directory(env_var_name: str, candidates: List[str], base_dir: Optional[str] = None) -> str:
+    env_path = os.getenv(env_var_name)
+    if env_path:
+        env_path = os.path.expanduser(env_path)
+        if os.path.isdir(env_path):
+            return env_path
+
+    if base_dir is None:
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    for candidate in candidates:
+        candidate_path = os.path.abspath(os.path.join(base_dir, candidate))
+        if os.path.isdir(candidate_path):
+            return candidate_path
+
+    raise FileNotFoundError(
+        f"Could not find path for {env_var_name}. Checked env var {env_var_name}={env_path} and candidates: {candidates} in {base_dir}"
+    )
+
+
 #@app.post("/sequences/", response_model=SequenceResponseModel, status_code=status.HTTP_201_CREATED)
 async def create_sequence(data: SequenceModel, collection = Depends(get_collection)):
     sequence_dict = data.model_dump()
@@ -269,32 +289,85 @@ async def get_pdb(sequence_id: str, collection = Depends(get_collection)):
 
 @app.post("/calcul/{sequence}")
 async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
+    sequence = sequence.upper()
     existe = await collection.find_one({"sequence": sequence})
     if existe:
         existe["_id"] = str(existe["_id"])
         return existe
 
-    RNA_PATH =  os.getenv("RNA_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Optimize_3D_ARNStructure")))
-    BEPS_PATH = os.getenv("BEPS_PATH", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "BEPS")))
-    
-    result_rna = subprocess.run([
-        sys.executable, "main.py", "launch",
-        "--input-val", sequence,
-        "--batch",
-        "--score", "RASP",
-        "--molecule", "RNA",
-        "--visualise",
-        "--save-metrics"
-    ], cwd=RNA_PATH)
-    
-    result_beps = subprocess.run([
-        sys.executable, "get_data.py",
-        "--sequence", sequence 
-        ], cwd=BEPS_PATH)
+    try:
+        RNA_PATH = find_directory(
+            "RNA_PATH",
+            [
+                "Optimize_3D_ARNStructure",
+                "Optimize_3D_ARNStructure-main",
+                os.path.join("Optimize_3D_ARNStructure-main", "Optimize_3D_ARNStructure"),
+            ],
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    try:
+        BEPS_PATH = find_directory(
+            "BEPS_PATH",
+            ["BEPS", "BEPS_API"],
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    try:
+        result_rna = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "launch",
+                "--input-val",
+                sequence,
+                "--batch",
+                "--score",
+                "RASP",
+                "--molecule",
+                "RNA",
+                "--visualise",
+                "--save-metrics",
+            ],
+            cwd=RNA_PATH,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"RNA calculation failed in {RNA_PATH}: {exc.stdout}\n{exc.stderr}"
+            ),
+        )
+
+    try:
+        result_beps = subprocess.run(
+            [
+                sys.executable,
+                "get_data.py",
+                "--sequence",
+                sequence,
+            ],
+            cwd=BEPS_PATH,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"BEPS calculation failed in {BEPS_PATH}: {exc.stdout}\n{exc.stderr}"
+            ),
+        )
 
     result = await collection.find_one({"sequence": sequence})
     if result:
         result["_id"] = str(result["_id"])
         return result
-    
+
     raise HTTPException(status_code=500, detail="Calcul échoué") 
