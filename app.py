@@ -319,18 +319,9 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     try:
         result_rna = subprocess.run(
             [
-                rna_python,
-                "main.py",
-                "launch",
-                "--input-val",
-                sequence,
-                "--batch",
-                "--score",
-                "RASP",
-                "--molecule",
-                "RNA",
-                "--visualise",
-                "--save-metrics",
+                "bash",
+                "-c",
+                f"source $(conda info --base)/etc/profile.d/conda.sh && conda activate rna_opt && python main.py launch --input-val {sequence} --batch --score RASP --molecule RNA --visualise --save-metrics",
             ],
             cwd=RNA_PATH,
             check=True,
