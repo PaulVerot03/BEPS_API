@@ -303,6 +303,7 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
                 "Optimize_3D_ARNStructure-main",
                 #os.path.join("Optimize_3D_ARNStructure-main", "Optimize_3D_ARNStructure"),
                 os.path.join("up2date", "OptimizeRNA"),
+                "/home/blender/app/up2date/Optimize_3D_ARNStructure",
             ],
         )
     except FileNotFoundError as exc:
@@ -340,10 +341,16 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
             detail=f"RNA executable not found: {exc}",
         )
     except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout.strip() if exc.stdout else "<no stdout>"
+        stderr = exc.stderr.strip() if exc.stderr else "<no stderr>"
         raise HTTPException(
             status_code=500,
             detail=(
-                f"RNA calculation failed in {RNA_PATH}: {exc.stdout}\n{exc.stderr}"
+                f"RNA calculation failed in {RNA_PATH}\n"
+                f"command: {exc.cmd}\n"
+                f"returncode: {exc.returncode}\n"
+                f"stdout: {stdout}\n"
+                f"stderr: {stderr}"
             ),
         )
 
