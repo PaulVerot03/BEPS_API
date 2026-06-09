@@ -301,7 +301,7 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
             [
                 "Optimize_3D_ARNStructure",
                 "Optimize_3D_ARNStructure-main",
-                os.path.join("Optimize_3D_ARNStructure-main", "Optimize_3D_ARNStructure"),
+                #os.path.join("Optimize_3D_ARNStructure-main", "Optimize_3D_ARNStructure"),
                 os.path.join("up2date", "OptimizeRNA"),
             ],
         )
