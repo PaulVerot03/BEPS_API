@@ -556,6 +556,38 @@ async def get_pdb(sequence_id: str, collection = Depends(get_collection)):
     return RedirectResponse(url=ovh_url)
 
 
+@app.get("/sequences/{sequence_id}/video")
+async def get_video(sequence_id: str, collection = Depends(get_collection)):
+    try:
+        parsed_id = collection.parse_id(sequence_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    
+    doc = await collection.find_one(
+        {"_id": parsed_id},
+        {"file": 1, "_id": 0}
+    )
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    
+    file_path = doc.get("file", "")
+    file_path = file_path.replace("outputs/", "")
+    
+    # Construct the video path by replacing the filename with folding_animation.mp4
+    parts = file_path.split("/")
+    if len(parts) > 1:
+        parts[-1] = "folding_animation.mp4"
+        video_path = "/".join(parts)
+    else:
+        video_path = "folding_animation.mp4"
+        
+    ovh_url = f"https://bucket.paulverot.fr/PDB/{video_path}"
+    print(f"URL OVH Video : {ovh_url}")  
+    
+    return RedirectResponse(url=ovh_url)
+
+
 @app.api_route("/calcul/{sequence}", methods=["GET", "POST"])
 async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     sequence = sequence.upper()
