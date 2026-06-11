@@ -68,16 +68,285 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Helper to convert MongoDB-like queries to ArangoDB AQL filters
+def mongo_query_to_aql(query: dict):
+    clauses = []
+    bind_vars = {}
+    var_idx = 0
+    
+    for key, value in query.items():
+        # Map fields to doc paths: e.g. metrics.chain -> doc.metrics.chain
+        path_parts = key.split(".")
+        arango_path = "doc." + ".".join(path_parts)
+        
+        if isinstance(value, dict):
+            for op, op_val in value.items():
+                var_name = f"val_{var_idx}"
+                var_idx += 1
+                if op == "$gt":
+                    clauses.append(f"{arango_path} > @{var_name}")
+                elif op == "$lt":
+                    clauses.append(f"{arango_path} < @{var_name}")
+                elif op == "$gte":
+                    clauses.append(f"{arango_path} >= @{var_name}")
+                elif op == "$lte":
+                    clauses.append(f"{arango_path} <= @{var_name}")
+                elif op == "$eq":
+                    clauses.append(f"{arango_path} == @{var_name}")
+                bind_vars[var_name] = op_val
+        else:
+            var_name = f"val_{var_idx}"
+            var_idx += 1
+            clauses.append(f"{arango_path} == @{var_name}")
+            bind_vars[var_name] = value
+            
+    filter_str = "FILTER " + " AND ".join(clauses) if clauses else ""
+    return filter_str, bind_vars
+
+
+# MongoDB Adapter Classes
+class MongoCursorAdapter:
+    def __init__(self, mongo_cursor):
+        self.cursor = mongo_cursor
+
+    def skip(self, skip_val: int):
+        self.cursor = self.cursor.skip(skip_val)
+        return self
+
+    def limit(self, limit_val: int):
+        self.cursor = self.cursor.limit(limit_val)
+        return self
+
+    def __aiter__(self):
+        return self.cursor.__aiter__()
+
+
+class MongoCollectionAdapter:
+    def __init__(self, mongo_collection):
+        self.collection = mongo_collection
+
+    def parse_id(self, sequence_id: str):
+        try:
+            return ObjectId(sequence_id)
+        except Exception:
+            raise ValueError("Invalid sequence ID format")
+
+    async def insert_one(self, document: dict):
+        class InsertResult:
+            def __init__(self, inserted_id):
+                self.inserted_id = inserted_id
+        result = await self.collection.insert_one(document)
+        return InsertResult(result.inserted_id)
+
+    def find(self, query: dict = None):
+        if query is None:
+            query = {}
+        cursor = self.collection.find(query)
+        return MongoCursorAdapter(cursor)
+
+    async def find_one(self, query: dict, projection: dict = None):
+        doc = await self.collection.find_one(query, projection)
+        return doc
+
+    async def update_one(self, query: dict, update_dict: dict):
+        class UpdateResult:
+            def __init__(self, matched_count):
+                self.matched_count = matched_count
+        result = await self.collection.update_one(query, update_dict)
+        return UpdateResult(result.matched_count)
+
+
+# ArangoDB Adapter Classes
+class ArangoCursorAdapter:
+    def __init__(self, db, query_filter, collection_name="sequences"):
+        self.db = db
+        self.query_filter = query_filter
+        self.collection_name = collection_name
+        self._skip = 0
+        self._limit = None
+        self._results = None
+        self._index = 0
+
+    def skip(self, skip_val: int):
+        self._skip = skip_val
+        return self
+
+    def limit(self, limit_val: int):
+        self._limit = limit_val
+        return self
+
+    async def _fetch(self):
+        import anyio
+        
+        def run_query():
+            filter_str, bind_vars = mongo_query_to_aql(self.query_filter)
+            limit_str = ""
+            if self._skip != 0 or self._limit is not None:
+                skip = self._skip
+                limit = self._limit if self._limit is not None else 999999999
+                limit_str = f"LIMIT {skip}, {limit}"
+                
+            aql = f"""
+            FOR doc IN {self.collection_name}
+                {filter_str}
+                {limit_str}
+                RETURN doc
+            """
+            cursor = self.db.aql.execute(aql, bind_vars=bind_vars)
+            results = []
+            for doc in cursor:
+                doc["_id"] = doc["_key"]
+                results.append(doc)
+            return results
+
+        self._results = await anyio.to_thread.run_sync(run_query)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._results is None:
+            await self._fetch()
+        if self._index >= len(self._results):
+            raise StopAsyncIteration
+        item = self._results[self._index]
+        self._index += 1
+        return item
+
+
+class ArangoCollectionAdapter:
+    def __init__(self, db, collection_name="sequences"):
+        self.db = db
+        self.collection_name = collection_name
+        self.collection = db.collection(collection_name)
+
+    def parse_id(self, sequence_id: str):
+        # ArangoDB keys are strings and don't need validation like ObjectId.
+        return sequence_id
+
+    async def insert_one(self, document: dict):
+        import anyio
+        
+        def run_insert():
+            res = self.collection.insert(document)
+            return res["_key"]
+            
+        key = await anyio.to_thread.run_sync(run_insert)
+        
+        class InsertResult:
+            def __init__(self, inserted_id):
+                self.inserted_id = inserted_id
+        return InsertResult(key)
+
+    def find(self, query: dict = None):
+        if query is None:
+            query = {}
+        return ArangoCursorAdapter(self.db, query, self.collection_name)
+
+    async def find_one(self, query: dict, projection: dict = None):
+        import anyio
+        
+        def run_find_one():
+            if len(query) == 1 and ("_id" in query or "_key" in query):
+                key = query.get("_id") or query.get("_key")
+                if isinstance(key, str):
+                    try:
+                        doc = self.collection.get(key)
+                        if doc:
+                            doc["_id"] = doc["_key"]
+                            if projection:
+                                doc = {k: v for k, v in doc.items() if projection.get(k) == 1}
+                            return doc
+                    except Exception:
+                        pass
+            
+            filter_str, bind_vars = mongo_query_to_aql(query)
+            aql = f"""
+            FOR doc IN {self.collection_name}
+                {filter_str}
+                LIMIT 1
+                RETURN doc
+            """
+            cursor = self.db.aql.execute(aql, bind_vars=bind_vars)
+            docs = list(cursor)
+            if docs:
+                doc = docs[0]
+                doc["_id"] = doc["_key"]
+                if projection:
+                    doc = {k: v for k, v in doc.items() if projection.get(k) == 1}
+                return doc
+            return None
+
+        return await anyio.to_thread.run_sync(run_find_one)
+
+    async def update_one(self, query: dict, update_dict: dict):
+        import anyio
+        
+        key = query.get("_id") or query.get("_key")
+        if not key:
+            raise NotImplementedError("ArangoDB update query must specify _id or _key")
+            
+        update_data = update_dict.get("$set", update_dict)
+        update_data["_key"] = key
+        
+        def run_replace():
+            try:
+                self.collection.replace(update_data)
+                return 1
+            except Exception:
+                return 0
+                
+        matched_count = await anyio.to_thread.run_sync(run_replace)
+        
+        class UpdateResult:
+            def __init__(self, matched_count):
+                self.matched_count = matched_count
+        return UpdateResult(matched_count)
+
+
 async def get_collection():
-    MONGO_URI = os.getenv("API_USER")
-    mongo_tls_env = os.getenv("MONGO_TLS")
-    if mongo_tls_env is None:
-        mongo_tls = True
+    db_type = os.getenv("DB_TYPE", "mongodb").lower()
+    
+    if db_type == "arangodb":
+        from arango import ArangoClient
+        import anyio
+        
+        ARANGO_URL = os.getenv("ARANGO_URL", "http://localhost:8529")
+        ARANGO_USER = os.getenv("ARANGO_USER", "root")
+        ARANGO_PASSWORD = os.getenv("ARANGO_PASSWORD", "")
+        ARANGO_DB = os.getenv("ARANGO_DB", "ARN")
+        
+        def connect_arango():
+            client = ArangoClient(hosts=ARANGO_URL)
+            try:
+                db = client.db(ARANGO_DB, username=ARANGO_USER, password=ARANGO_PASSWORD)
+                if not db.has_collection("sequences"):
+                    db.create_collection("sequences")
+            except Exception as direct_error:
+                try:
+                    sys_db = client.db('_system', username=ARANGO_USER, password=ARANGO_PASSWORD)
+                    if not sys_db.has_database(ARANGO_DB):
+                        sys_db.create_database(ARANGO_DB)
+                    db = client.db(ARANGO_DB, username=ARANGO_USER, password=ARANGO_PASSWORD)
+                    if not db.has_collection("sequences"):
+                        db.create_collection("sequences")
+                except Exception as sys_error:
+                    raise direct_error
+            return db
+            
+        db = await anyio.to_thread.run_sync(connect_arango)
+        return ArangoCollectionAdapter(db)
+        
     else:
-        mongo_tls = mongo_tls_env.lower() in ("true", "1", "yes")
-    client = AsyncMongoClient(MONGO_URI, tls=False)
-    db = client["arn"]
-    return db["sequences"]
+        MONGO_URI = os.getenv("API_USER")
+        mongo_tls_env = os.getenv("MONGO_TLS")
+        if mongo_tls_env is None:
+            mongo_tls = True
+        else:
+            mongo_tls = mongo_tls_env.lower() in ("true", "1", "yes")
+        client = AsyncMongoClient(MONGO_URI, tls=False)
+        db = client["arn"]
+        return MongoCollectionAdapter(db["sequences"])
 
 
 def find_directory(env_var_name: str, candidates: List[str], base_dir: Optional[str] = None) -> str:
@@ -122,11 +391,11 @@ async def list_sequences(limit: int = 10, skip: int = 0, collection = Depends(ge
 @app.get("/sequences/{sequence_id}", response_model=SequenceResponseModel)
 async def by_sequence(sequence_id: str, collection = Depends(get_collection)):
     try:
-        obj_id = ObjectId(sequence_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid sequence ID format")
+        parsed_id = collection.parse_id(sequence_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
         
-    doc = await collection.find_one({"_id": obj_id})
+    doc = await collection.find_one({"_id": parsed_id})
     if doc:
         doc["_id"] = str(doc["_id"])
         return doc
@@ -136,17 +405,17 @@ async def by_sequence(sequence_id: str, collection = Depends(get_collection)):
 @app.put("/sequences/{sequence_id}", response_model=SequenceResponseModel)
 async def update_sequence(sequence_id: str, data: SequenceModel, collection = Depends(get_collection)):
     try:
-        obj_id = ObjectId(sequence_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid sequence ID format")
+        parsed_id = collection.parse_id(sequence_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
         
     update_data = data.model_dump()
-    result = await collection.update_one({"_id": obj_id}, {"$set": update_data})
+    result = await collection.update_one({"_id": parsed_id}, {"$set": update_data})
     
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Sequence not found")
         
-    updated_doc = await collection.find_one({"_id": obj_id})
+    updated_doc = await collection.find_one({"_id": parsed_id})
     updated_doc["_id"] = str(updated_doc["_id"])
     return updated_doc
 
@@ -255,12 +524,12 @@ async def by_length(length: int, collection = Depends(get_collection)):
 @app.get("/sequences/{sequence_id}/pdb")
 async def get_pdb(sequence_id: str, collection = Depends(get_collection)):
     try:
-        obj_id = ObjectId(sequence_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid sequence ID format")
+        parsed_id = collection.parse_id(sequence_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     
     doc = await collection.find_one(
-        {"_id": obj_id},
+        {"_id": parsed_id},
         {"file": 1, "_id": 0}
     )
     
@@ -354,11 +623,14 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
             ),
         )
 
+    db_type = os.getenv("DB_TYPE", "mongodb").lower()
+    beps_script = "get_data_arango.py" if db_type == "arangodb" else "get_data.py"
+    
     try:
         result_beps = subprocess.run(
             [
                 sys.executable,
-                "get_data.py",
+                beps_script,
                 "--sequence",
                 sequence,
             ],

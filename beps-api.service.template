@@ -1,0 +1,24 @@
+[Unit]
+Description=BEPS FastAPI Application Service
+After=network.target
+
+[Service]
+User=blender
+
+WorkingDirectory=/home/blender/BEPS_API
+
+Environment="PATH=/home/blender/BEPS_API/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+EnvironmentFile=/home/blender/BEPS_API/.env
+
+ExecStart=/home/blender/BEPS_API/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=beps-api
+
+[Install]
+WantedBy=multi-user.target
