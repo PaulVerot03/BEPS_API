@@ -624,11 +624,12 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     env["TF_CPP_MIN_LOG_LEVEL"] = "2"
     
     try:
+        launch_script_path = os.path.join(RNA_PATH, "ignore", "launch.sh")
         result_rna = subprocess.run(
             [
                 "bash",
-                "-c",
-                f"source $(conda info --base)/etc/profile.d/conda.sh && conda activate rna_opt && python main.py launch --input-val {sequence} --batch --score RASP --molecule RNA --visualise --save-metrics",
+                launch_script_path,
+                sequence
             ],
             cwd=RNA_PATH,
             env=env,
