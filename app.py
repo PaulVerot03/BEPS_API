@@ -620,7 +620,6 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
 
     rna_python = os.getenv("RNA_PYTHON", sys.executable)
     env = os.environ.copy()
-    env["CUDA_LAUNCH_BLOCKING"] = "1"
     env["TF_CPP_MIN_LOG_LEVEL"] = "2"
     
     try:
