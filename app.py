@@ -624,7 +624,7 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
     env["TF_CPP_MIN_LOG_LEVEL"] = "2"
     
     try:
-        launch_script_path = os.path.join(RNA_PATH, "ignore", "launch.sh")
+        launch_script_path = "/home/blender/opt_launcher/launch.sh"
         result_rna = subprocess.run(
             [
                 "bash",
