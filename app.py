@@ -684,4 +684,4 @@ async def calcul_sequence(sequence: str, collection = Depends(get_collection)):
         result["_id"] = str(result["_id"])
         return result
 
-    raise HTTPException(status_code=500, detail="Calcul échoué") 
+    raise HTTPException(status_code=500, detail=f"Calcul échoué. BEPS output: {result_beps.stdout.strip()} | Errors: {result_beps.stderr.strip()}") 
